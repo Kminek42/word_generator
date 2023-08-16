@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 filename = "data_miasta.csv"
 
@@ -22,46 +23,79 @@ stream = [ctoi[c] for c in stream]
 X = torch.tensor([stream[i : i + INPUT_N] for i in range(len(stream) - INPUT_N)])
 Y = torch.tensor([stream[i + INPUT_N] for i in range(len(stream) - INPUT_N)])
 
-class WordGenerator(nn.Module):
-    def __init__(self, *args, dictionary_len, input_n, embedding_dim, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.Embedding = nn.Embedding(dictionary_len, embedding_dim)
 
-        self.Lin1 = nn.Linear(embedding_dim * input_n, 256)
-        self.Lin2 = nn.Linear(256, 256)
-        self.Lin3 = nn.Linear(256, 256)
-        self.Lin4 = nn.Linear(256, dictionary_len)
+# shuffle set
+indexes = torch.randperm(len(X))
+X = X[indexes]
+Y = Y[indexes]
 
-    def forward(self, X):
-        X = self.Embedding(X)
+# split to train and val
+ratio = 0.95
+split_id = int(len(X) * ratio)
+X_train = X[:split_id]
+Y_train = Y[:split_id]
 
-        X = nn.Flatten()(X)
+X_val = X[split_id:]
+Y_val = Y[split_id:]
 
-        X = self.Lin1(X)
-        X = nn.ReLU()(X)
-        X = self.Lin2(X)
-        X = nn.ReLU()(X)
-        X = self.Lin3(X)
-        X = nn.ReLU()(X)
-        X = self.Lin4(X)
+EMBEDDING_DIM = 16
+HIDDEN_N = 256
 
-        return X
+model = nn.Sequential(
+    nn.Embedding(len(words), EMBEDDING_DIM),
+    nn.Flatten(),
+    nn.Linear(INPUT_N * EMBEDDING_DIM, HIDDEN_N),
+    nn.ReLU(),
+    nn.Linear(HIDDEN_N, HIDDEN_N),
+    nn.ReLU(),
+    nn.Linear(HIDDEN_N, HIDDEN_N),
+    nn.ReLU(),
+    nn.Linear(HIDDEN_N, len(words))
+)
 
-model = WordGenerator(dictionary_len=len(words), input_n=INPUT_N, embedding_dim=8)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
 
 print(sum(p.numel() for p in model.parameters()))
-for i in range(1024):
-    indexes = torch.randint(0, len(X), (1024, ))
-    batch_X = X[indexes]
-    batch_Y = Y[indexes]
+
+train_loss = []
+val_loss = []
+
+BATCH_SIZE = 4096
+best_loss = 10
+counter = 10
+for i in range(256):
+    indexes = torch.randint(0, len(X_train), (BATCH_SIZE, ))
+    batch_X = X_train[indexes]
+    batch_Y = Y_train[indexes]
     pred = model.forward(batch_X)
     optimizer.zero_grad()
-    loss = criterion(pred, batch_Y)
-    loss.backward()
+    loss1 = criterion(pred, batch_Y)
+    loss1.backward()
     optimizer.step()
-    print(loss.item())
+    train_loss.append(loss1.item())
+
+    # validation
+    pred = model.forward(X_val)
+    loss = criterion(pred, Y_val)
+    print(f"Train loss: {loss1.item()}")
+    print(f"Val loss: {loss.item()}\n")
+    if best_loss > loss.item():
+        best_loss = loss.item()
+        counter = 4
+    
+    else:
+        counter -= 1
+        print(counter)
+        if counter == 0:
+            break
+    
+
+    val_loss.append(loss.item())
+
+plt.plot(train_loss)
+plt.plot(val_loss)
+plt.show()
 
 while 2137:
     text = "." * INPUT_N
